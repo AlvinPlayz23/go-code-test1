@@ -47,6 +47,7 @@ func main() {
 		DeleteFolderDefinition,
 		RenameFolderDefinition,
 		TerminalRunDefinition,
+		CreateWebsiteDefinition,
 	}
 	agent := NewAgent(client, getUserMessage, tools)
 	err := agent.Run(context.TODO())
@@ -96,7 +97,9 @@ func (a *Agent) Run(ctx context.Context) error {
 
 		response, err := a.runInference(ctx, conversation)
 		if err != nil {
-			return err
+			fmt.Printf("\u001b[91mError\u001b[0m: %s\n", err.Error())
+			readUserInput = true
+			continue
 		}
 
 		assistantMessage := response.Choices[0].Message
@@ -141,6 +144,7 @@ func (a *Agent) runInference(ctx context.Context, conversation []openai.ChatComp
 		Messages:   conversation,
 		Tools:      tools,
 		ToolChoice: "auto",
+		MaxTokens:  4000, // Increased token limit for longer responses
 	})
 	return response, err
 }
@@ -756,4 +760,403 @@ func TerminalRun(input json.RawMessage) (string, error) {
 	}
 
 	return result, nil
+}
+
+var CreateWebsiteDefinition = ToolDefinition{
+	Name:        "create_website",
+	Description: "Create a complete website with HTML, CSS, and JavaScript files. This tool creates separate files for better organization and handles large content.",
+	InputSchema: CreateWebsiteInputSchema,
+	Function:    CreateWebsite,
+}
+
+type CreateWebsiteInput struct {
+	FolderPath  string `json:"folder_path" jsonschema_description:"The folder where the website files should be created"`
+	ProjectName string `json:"project_name" jsonschema_description:"Name of the website/project (used for titles and file names)"`
+	Description string `json:"description" jsonschema_description:"Brief description of what the website should be about"`
+	Style       string `json:"style,omitempty" jsonschema_description:"Style preference (e.g., 'modern', 'minimal', 'colorful', 'professional')"`
+}
+
+var CreateWebsiteInputSchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"folder_path": map[string]any{
+			"type":        "string",
+			"description": "The folder where the website files should be created",
+		},
+		"project_name": map[string]any{
+			"type":        "string",
+			"description": "Name of the website/project (used for titles and file names)",
+		},
+		"description": map[string]any{
+			"type":        "string",
+			"description": "Brief description of what the website should be about",
+		},
+		"style": map[string]any{
+			"type":        "string",
+			"description": "Style preference (e.g., 'modern', 'minimal', 'colorful', 'professional')",
+		},
+	},
+	"required": []string{"folder_path", "project_name", "description"},
+}
+
+func CreateWebsite(input json.RawMessage) (string, error) {
+	websiteInput := CreateWebsiteInput{}
+	err := json.Unmarshal(input, &websiteInput)
+	if err != nil {
+		return "", err
+	}
+
+	if websiteInput.FolderPath == "" || websiteInput.ProjectName == "" || websiteInput.Description == "" {
+		return "", fmt.Errorf("folder_path, project_name, and description are required")
+	}
+
+	// Create the folder if it doesn't exist
+	err = os.MkdirAll(websiteInput.FolderPath, 0755)
+	if err != nil {
+		return "", fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	// Create HTML file
+	htmlContent := generateHTML(websiteInput.ProjectName, websiteInput.Description, websiteInput.Style)
+	htmlPath := filepath.Join(websiteInput.FolderPath, "index.html")
+	err = os.WriteFile(htmlPath, []byte(htmlContent), 0644)
+	if err != nil {
+		return "", fmt.Errorf("failed to create HTML file: %w", err)
+	}
+
+	// Create CSS file
+	cssContent := generateCSS(websiteInput.Style)
+	cssPath := filepath.Join(websiteInput.FolderPath, "style.css")
+	err = os.WriteFile(cssPath, []byte(cssContent), 0644)
+	if err != nil {
+		return "", fmt.Errorf("failed to create CSS file: %w", err)
+	}
+
+	// Create JS file
+	jsContent := generateJS(websiteInput.ProjectName)
+	jsPath := filepath.Join(websiteInput.FolderPath, "script.js")
+	err = os.WriteFile(jsPath, []byte(jsContent), 0644)
+	if err != nil {
+		return "", fmt.Errorf("failed to create JS file: %w", err)
+	}
+
+	return fmt.Sprintf("Successfully created website '%s' in %s with files: index.html, style.css, script.js", websiteInput.ProjectName, websiteInput.FolderPath), nil
+}
+
+func generateHTML(projectName, description, style string) string {
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>%s</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <nav>
+            <div class="logo">%s</div>
+            <ul class="nav-links">
+                <li><a href="#home">Home</a></li>
+                <li><a href="#about">About</a></li>
+                <li><a href="#services">Services</a></li>
+                <li><a href="#contact">Contact</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main>
+        <section id="home" class="hero">
+            <div class="hero-content">
+                <h1>Welcome to %s</h1>
+                <p>%s</p>
+                <button class="cta-button" onclick="showAlert()">Get Started</button>
+            </div>
+        </section>
+
+        <section id="about" class="about">
+            <div class="container">
+                <h2>About Us</h2>
+                <p>We are dedicated to providing excellent service and innovative solutions.</p>
+            </div>
+        </section>
+
+        <section id="services" class="services">
+            <div class="container">
+                <h2>Our Services</h2>
+                <div class="service-grid">
+                    <div class="service-card">
+                        <h3>Service 1</h3>
+                        <p>High-quality service description here.</p>
+                    </div>
+                    <div class="service-card">
+                        <h3>Service 2</h3>
+                        <p>Another excellent service we provide.</p>
+                    </div>
+                    <div class="service-card">
+                        <h3>Service 3</h3>
+                        <p>Premium service with great value.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="contact" class="contact">
+            <div class="container">
+                <h2>Contact Us</h2>
+                <p>Get in touch with us today!</p>
+                <button class="contact-button" onclick="showContact()">Contact Now</button>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>&copy; 2025 %s. All rights reserved.</p>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>`, projectName, projectName, projectName, description, projectName)
+}
+
+func generateCSS(style string) string {
+	return `* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Arial', sans-serif;
+    line-height: 1.6;
+    color: #333;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 20px;
+}
+
+header {
+    background: #fff;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    position: fixed;
+    width: 100%;
+    top: 0;
+    z-index: 1000;
+}
+
+nav {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem 2rem;
+}
+
+.logo {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: #2c3e50;
+}
+
+.nav-links {
+    display: flex;
+    list-style: none;
+    gap: 2rem;
+}
+
+.nav-links a {
+    text-decoration: none;
+    color: #333;
+    transition: color 0.3s;
+}
+
+.nav-links a:hover {
+    color: #3498db;
+}
+
+main {
+    margin-top: 80px;
+}
+
+.hero {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 100px 0;
+    text-align: center;
+}
+
+.hero-content h1 {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+}
+
+.hero-content p {
+    font-size: 1.2rem;
+    margin-bottom: 2rem;
+    max-width: 600px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.cta-button, .contact-button {
+    background: #e74c3c;
+    color: white;
+    border: none;
+    padding: 15px 30px;
+    font-size: 1.1rem;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background 0.3s;
+}
+
+.cta-button:hover, .contact-button:hover {
+    background: #c0392b;
+}
+
+.about, .services, .contact {
+    padding: 80px 0;
+}
+
+.about {
+    background: #f8f9fa;
+}
+
+.about h2, .services h2, .contact h2 {
+    text-align: center;
+    margin-bottom: 3rem;
+    font-size: 2.5rem;
+    color: #2c3e50;
+}
+
+.service-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 2rem;
+    margin-top: 3rem;
+}
+
+.service-card {
+    background: white;
+    padding: 2rem;
+    border-radius: 10px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+    text-align: center;
+    transition: transform 0.3s;
+}
+
+.service-card:hover {
+    transform: translateY(-5px);
+}
+
+.service-card h3 {
+    color: #2c3e50;
+    margin-bottom: 1rem;
+}
+
+.contact {
+    background: #2c3e50;
+    color: white;
+    text-align: center;
+}
+
+.contact h2 {
+    color: white;
+}
+
+footer {
+    background: #34495e;
+    color: white;
+    text-align: center;
+    padding: 2rem 0;
+}
+
+@media (max-width: 768px) {
+    .nav-links {
+        display: none;
+    }
+
+    .hero-content h1 {
+        font-size: 2rem;
+    }
+
+    .service-grid {
+        grid-template-columns: 1fr;
+    }
+}`
+}
+
+func generateJS(projectName string) string {
+	return fmt.Sprintf(`// %s Website JavaScript
+
+// Smooth scrolling for navigation links
+document.addEventListener('DOMContentLoaded', function() {
+    const navLinks = document.querySelectorAll('.nav-links a');
+
+    navLinks.forEach(link => {
+        link.addEventListener('click', function(e) {
+            e.preventDefault();
+            const targetId = this.getAttribute('href').substring(1);
+            const targetSection = document.getElementById(targetId);
+
+            if (targetSection) {
+                targetSection.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'start'
+                });
+            }
+        });
+    });
+});
+
+// CTA Button functionality
+function showAlert() {
+    alert('Welcome to %s! This is a demo website created by the AI agent.');
+}
+
+// Contact button functionality
+function showContact() {
+    const email = 'contact@%s.com';
+    const phone = '+1 (555) 123-4567';
+
+    alert('Contact Information:\\n\\nEmail: ' + email + '\\nPhone: ' + phone + '\\n\\nThis is a demo contact - replace with real information!');
+}
+
+// Add some interactive animations
+document.addEventListener('DOMContentLoaded', function() {
+    // Animate service cards on scroll
+    const observerOptions = {
+        threshold: 0.1,
+        rootMargin: '0px 0px -50px 0px'
+    };
+
+    const observer = new IntersectionObserver(function(entries) {
+        entries.forEach(entry => {
+            if (entry.isIntersecting) {
+                entry.target.style.opacity = '1';
+                entry.target.style.transform = 'translateY(0)';
+            }
+        });
+    }, observerOptions);
+
+    // Observe service cards
+    const serviceCards = document.querySelectorAll('.service-card');
+    serviceCards.forEach(card => {
+        card.style.opacity = '0';
+        card.style.transform = 'translateY(20px)';
+        card.style.transition = 'opacity 0.6s ease, transform 0.6s ease';
+        observer.observe(card);
+    });
+});
+
+// Add mobile menu toggle (basic implementation)
+function toggleMobileMenu() {
+    const navLinks = document.querySelector('.nav-links');
+    navLinks.classList.toggle('mobile-active');
+}
+
+// Console welcome message
+console.log('Welcome to %s! This website was created by an AI agent.');
+console.log('Feel free to explore the code and customize it to your needs!');`, projectName, projectName, projectName, projectName)
 }

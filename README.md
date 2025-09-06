@@ -20,6 +20,9 @@ A powerful AI-powered code-editing agent that can read, write, and manipulate fi
 ### 💻 Terminal Operations
 - **terminal_run** - Execute terminal commands and capture output
 
+### 🌐 Web Development
+- **create_website** - Create complete websites with HTML, CSS, and JavaScript files
+
 ## 🛠️ Setup
 
 1. **Get a Groq API key** from [console.groq.com](https://console.groq.com)
@@ -79,6 +82,7 @@ Agent: I'll create the projects folder.
 | `delete_folder` | Delete directory | `path` |
 | `rename_folder` | Rename/move directory | `old_path`, `new_path` |
 | `terminal_run` | Execute command | `command`, `timeout` (optional) |
+| `create_website` | Create complete website | `folder_path`, `project_name`, `description`, `style` (optional) |
 
 ## ⚠️ Safety Notes
 
