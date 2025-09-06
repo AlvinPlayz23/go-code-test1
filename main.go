@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/sashabaranov/go-openai"
 	"github.com/invopop/jsonschema"
@@ -34,7 +36,18 @@ func main() {
 		return scanner.Text(), true
 	}
 
-	tools := []ToolDefinition{ReadFileDefinition, ListFilesDefinition, EditFileDefinition}
+	tools := []ToolDefinition{
+		ReadFileDefinition,
+		ListFilesDefinition,
+		EditFileDefinition,
+		CreateFileDefinition,
+		DeleteFileDefinition,
+		RenameFileDefinition,
+		CreateFolderDefinition,
+		DeleteFolderDefinition,
+		RenameFolderDefinition,
+		TerminalRunDefinition,
+	}
 	agent := NewAgent(client, getUserMessage, tools)
 	err := agent.Run(context.TODO())
 	if err != nil {
@@ -365,4 +378,382 @@ func createNewFile(filePath, content string) (string, error) {
 	}
 
 	return fmt.Sprintf("Successfully created file %s", filePath), nil
+}
+
+var CreateFileDefinition = ToolDefinition{
+	Name:        "create_file",
+	Description: "Create a new file with specified content. If the file already exists, it will be overwritten.",
+	InputSchema: CreateFileInputSchema,
+	Function:    CreateFile,
+}
+
+type CreateFileInput struct {
+	Path    string `json:"path" jsonschema_description:"The path where the file should be created"`
+	Content string `json:"content" jsonschema_description:"The content to write to the file"`
+}
+
+var CreateFileInputSchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"path": map[string]any{
+			"type":        "string",
+			"description": "The path where the file should be created",
+		},
+		"content": map[string]any{
+			"type":        "string",
+			"description": "The content to write to the file",
+		},
+	},
+	"required": []string{"path", "content"},
+}
+
+func CreateFile(input json.RawMessage) (string, error) {
+	createFileInput := CreateFileInput{}
+	err := json.Unmarshal(input, &createFileInput)
+	if err != nil {
+		return "", err
+	}
+
+	if createFileInput.Path == "" {
+		return "", fmt.Errorf("path cannot be empty")
+	}
+
+	// Create directory if it doesn't exist
+	dir := path.Dir(createFileInput.Path)
+	if dir != "." {
+		err := os.MkdirAll(dir, 0755)
+		if err != nil {
+			return "", fmt.Errorf("failed to create directory: %w", err)
+		}
+	}
+
+	err = os.WriteFile(createFileInput.Path, []byte(createFileInput.Content), 0644)
+	if err != nil {
+		return "", fmt.Errorf("failed to create file: %w", err)
+	}
+
+	return fmt.Sprintf("Successfully created file %s", createFileInput.Path), nil
+}
+
+var DeleteFileDefinition = ToolDefinition{
+	Name:        "delete_file",
+	Description: "Delete an existing file. Use with caution as this action cannot be undone.",
+	InputSchema: DeleteFileInputSchema,
+	Function:    DeleteFile,
+}
+
+type DeleteFileInput struct {
+	Path string `json:"path" jsonschema_description:"The path of the file to delete"`
+}
+
+var DeleteFileInputSchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"path": map[string]any{
+			"type":        "string",
+			"description": "The path of the file to delete",
+		},
+	},
+	"required": []string{"path"},
+}
+
+func DeleteFile(input json.RawMessage) (string, error) {
+	deleteFileInput := DeleteFileInput{}
+	err := json.Unmarshal(input, &deleteFileInput)
+	if err != nil {
+		return "", err
+	}
+
+	if deleteFileInput.Path == "" {
+		return "", fmt.Errorf("path cannot be empty")
+	}
+
+	// Check if file exists
+	if _, err := os.Stat(deleteFileInput.Path); os.IsNotExist(err) {
+		return "", fmt.Errorf("file does not exist: %s", deleteFileInput.Path)
+	}
+
+	err = os.Remove(deleteFileInput.Path)
+	if err != nil {
+		return "", fmt.Errorf("failed to delete file: %w", err)
+	}
+
+	return fmt.Sprintf("Successfully deleted file %s", deleteFileInput.Path), nil
+}
+
+var RenameFileDefinition = ToolDefinition{
+	Name:        "rename_file",
+	Description: "Rename or move a file from one location to another.",
+	InputSchema: RenameFileInputSchema,
+	Function:    RenameFile,
+}
+
+type RenameFileInput struct {
+	OldPath string `json:"old_path" jsonschema_description:"The current path of the file"`
+	NewPath string `json:"new_path" jsonschema_description:"The new path for the file"`
+}
+
+var RenameFileInputSchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"old_path": map[string]any{
+			"type":        "string",
+			"description": "The current path of the file",
+		},
+		"new_path": map[string]any{
+			"type":        "string",
+			"description": "The new path for the file",
+		},
+	},
+	"required": []string{"old_path", "new_path"},
+}
+
+func RenameFile(input json.RawMessage) (string, error) {
+	renameFileInput := RenameFileInput{}
+	err := json.Unmarshal(input, &renameFileInput)
+	if err != nil {
+		return "", err
+	}
+
+	if renameFileInput.OldPath == "" || renameFileInput.NewPath == "" {
+		return "", fmt.Errorf("both old_path and new_path must be provided")
+	}
+
+	// Check if source file exists
+	if _, err := os.Stat(renameFileInput.OldPath); os.IsNotExist(err) {
+		return "", fmt.Errorf("source file does not exist: %s", renameFileInput.OldPath)
+	}
+
+	// Create directory for new path if needed
+	dir := path.Dir(renameFileInput.NewPath)
+	if dir != "." {
+		err := os.MkdirAll(dir, 0755)
+		if err != nil {
+			return "", fmt.Errorf("failed to create directory: %w", err)
+		}
+	}
+
+	err = os.Rename(renameFileInput.OldPath, renameFileInput.NewPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to rename file: %w", err)
+	}
+
+	return fmt.Sprintf("Successfully renamed %s to %s", renameFileInput.OldPath, renameFileInput.NewPath), nil
+}
+
+var CreateFolderDefinition = ToolDefinition{
+	Name:        "create_folder",
+	Description: "Create a new directory/folder. Creates parent directories if they don't exist.",
+	InputSchema: CreateFolderInputSchema,
+	Function:    CreateFolder,
+}
+
+type CreateFolderInput struct {
+	Path string `json:"path" jsonschema_description:"The path of the directory to create"`
+}
+
+var CreateFolderInputSchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"path": map[string]any{
+			"type":        "string",
+			"description": "The path of the directory to create",
+		},
+	},
+	"required": []string{"path"},
+}
+
+func CreateFolder(input json.RawMessage) (string, error) {
+	createFolderInput := CreateFolderInput{}
+	err := json.Unmarshal(input, &createFolderInput)
+	if err != nil {
+		return "", err
+	}
+
+	if createFolderInput.Path == "" {
+		return "", fmt.Errorf("path cannot be empty")
+	}
+
+	err = os.MkdirAll(createFolderInput.Path, 0755)
+	if err != nil {
+		return "", fmt.Errorf("failed to create directory: %w", err)
+	}
+
+	return fmt.Sprintf("Successfully created directory %s", createFolderInput.Path), nil
+}
+
+var DeleteFolderDefinition = ToolDefinition{
+	Name:        "delete_folder",
+	Description: "Delete a directory/folder and all its contents. Use with extreme caution as this action cannot be undone.",
+	InputSchema: DeleteFolderInputSchema,
+	Function:    DeleteFolder,
+}
+
+type DeleteFolderInput struct {
+	Path string `json:"path" jsonschema_description:"The path of the directory to delete"`
+}
+
+var DeleteFolderInputSchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"path": map[string]any{
+			"type":        "string",
+			"description": "The path of the directory to delete",
+		},
+	},
+	"required": []string{"path"},
+}
+
+func DeleteFolder(input json.RawMessage) (string, error) {
+	deleteFolderInput := DeleteFolderInput{}
+	err := json.Unmarshal(input, &deleteFolderInput)
+	if err != nil {
+		return "", err
+	}
+
+	if deleteFolderInput.Path == "" {
+		return "", fmt.Errorf("path cannot be empty")
+	}
+
+	// Check if directory exists
+	if _, err := os.Stat(deleteFolderInput.Path); os.IsNotExist(err) {
+		return "", fmt.Errorf("directory does not exist: %s", deleteFolderInput.Path)
+	}
+
+	err = os.RemoveAll(deleteFolderInput.Path)
+	if err != nil {
+		return "", fmt.Errorf("failed to delete directory: %w", err)
+	}
+
+	return fmt.Sprintf("Successfully deleted directory %s", deleteFolderInput.Path), nil
+}
+
+var RenameFolderDefinition = ToolDefinition{
+	Name:        "rename_folder",
+	Description: "Rename or move a directory from one location to another.",
+	InputSchema: RenameFolderInputSchema,
+	Function:    RenameFolder,
+}
+
+type RenameFolderInput struct {
+	OldPath string `json:"old_path" jsonschema_description:"The current path of the directory"`
+	NewPath string `json:"new_path" jsonschema_description:"The new path for the directory"`
+}
+
+var RenameFolderInputSchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"old_path": map[string]any{
+			"type":        "string",
+			"description": "The current path of the directory",
+		},
+		"new_path": map[string]any{
+			"type":        "string",
+			"description": "The new path for the directory",
+		},
+	},
+	"required": []string{"old_path", "new_path"},
+}
+
+func RenameFolder(input json.RawMessage) (string, error) {
+	renameFolderInput := RenameFolderInput{}
+	err := json.Unmarshal(input, &renameFolderInput)
+	if err != nil {
+		return "", err
+	}
+
+	if renameFolderInput.OldPath == "" || renameFolderInput.NewPath == "" {
+		return "", fmt.Errorf("both old_path and new_path must be provided")
+	}
+
+	// Check if source directory exists
+	if _, err := os.Stat(renameFolderInput.OldPath); os.IsNotExist(err) {
+		return "", fmt.Errorf("source directory does not exist: %s", renameFolderInput.OldPath)
+	}
+
+	// Create parent directory for new path if needed
+	parentDir := path.Dir(renameFolderInput.NewPath)
+	if parentDir != "." {
+		err := os.MkdirAll(parentDir, 0755)
+		if err != nil {
+			return "", fmt.Errorf("failed to create parent directory: %w", err)
+		}
+	}
+
+	err = os.Rename(renameFolderInput.OldPath, renameFolderInput.NewPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to rename directory: %w", err)
+	}
+
+	return fmt.Sprintf("Successfully renamed directory %s to %s", renameFolderInput.OldPath, renameFolderInput.NewPath), nil
+}
+
+var TerminalRunDefinition = ToolDefinition{
+	Name:        "terminal_run",
+	Description: "Execute a terminal/command line command and return its output. Use with caution as this can execute any system command.",
+	InputSchema: TerminalRunInputSchema,
+	Function:    TerminalRun,
+}
+
+type TerminalRunInput struct {
+	Command string `json:"command" jsonschema_description:"The command to execute in the terminal"`
+	Timeout int    `json:"timeout,omitempty" jsonschema_description:"Timeout in seconds (default: 30)"`
+}
+
+var TerminalRunInputSchema = map[string]any{
+	"type": "object",
+	"properties": map[string]any{
+		"command": map[string]any{
+			"type":        "string",
+			"description": "The command to execute in the terminal",
+		},
+		"timeout": map[string]any{
+			"type":        "integer",
+			"description": "Timeout in seconds (default: 30)",
+		},
+	},
+	"required": []string{"command"},
+}
+
+func TerminalRun(input json.RawMessage) (string, error) {
+	terminalRunInput := TerminalRunInput{}
+	err := json.Unmarshal(input, &terminalRunInput)
+	if err != nil {
+		return "", err
+	}
+
+	if terminalRunInput.Command == "" {
+		return "", fmt.Errorf("command cannot be empty")
+	}
+
+	// Set default timeout
+	timeout := 30
+	if terminalRunInput.Timeout > 0 {
+		timeout = terminalRunInput.Timeout
+	}
+
+	// Create context with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+	defer cancel()
+
+	// Execute command based on OS
+	var cmd *exec.Cmd
+	if strings.Contains(strings.ToLower(os.Getenv("OS")), "windows") {
+		cmd = exec.CommandContext(ctx, "powershell", "-Command", terminalRunInput.Command)
+	} else {
+		cmd = exec.CommandContext(ctx, "sh", "-c", terminalRunInput.Command)
+	}
+
+	// Capture both stdout and stderr
+	output, err := cmd.CombinedOutput()
+
+	result := fmt.Sprintf("Command: %s\n", terminalRunInput.Command)
+	result += fmt.Sprintf("Exit Code: %d\n", cmd.ProcessState.ExitCode())
+	result += fmt.Sprintf("Output:\n%s", string(output))
+
+	if err != nil {
+		result += fmt.Sprintf("\nError: %s", err.Error())
+	}
+
+	return result, nil
 }
